@@ -306,9 +306,70 @@ the development branch will first be merged into the
 
 Go through the same procedure for all xcube plugin packages dependent on this version of xcube.
 
-TODO: Describe deployment to xcube conda package after release
-TODO: Describe deployment of xcube Docker image after release
+### xcube conda-forge Release
 
+Once xcube is released, conda-forge's 'regro-cf-autotick-bot' automatically generates a new PR
+called [xcube_version] (e.g. 0.3.0). The new PR, though, uses the current recipe (meta.yml) which 
+might be outdated. Hence, the checks often fail. Implement the following steps to get
+the checks running and to generate a final conda-forge release (also refer to 
+[conda-forge's manual](https://conda-forge.org/docs/maintainer/updating_pkgs.html)):    
+
+* Be or become a maintainer. To become a maintainer add your GitHub username to the maintainer list
+  in the conda recipe and approve it by mentioning your approval in the PR's comments
+* Use Pycharm to clone the GitHub repository https://github.com/conda-forge/xcube-feedstock
+* Add a new remote [your_remote_name]/https://github.com/regro-cf-autotick-bot/xcube-feedstock
+* Update your project and checkout the branch [your_remote_name]/[xcube_version]
+* Open ```recipe/meta.yaml```:
+    - Ensure that the run! requirements are 100% in sync with xcube
+    - Ensure that the build! python version is in sync with the run section
+    - Check the entry points. These need to be in sync with xcube's setup.py!
+    - Ensure the license file is being packaged (in the xcube release archive) and that 
+      the file name of the license file in the archive and the in the meta.yml are the same.     
+    - Check whether all other info (e.g. the about section) is up-to-date and correct
+* Run `conda build -c conda-forge recipe` in the terminal 
+* Push your changes and monitor the build process if the previous step succeeded      
+* Open the PR on [GitHub](https://github.com/conda-forge/xcube-feedstock) and 
+  monitor the checks 
+* When they succeed, check the PR's checklist, accept the PR and merge it
+* The actual deployment will take a while. Once the new version has been published, 
+  test it by running `conda create -n [your_env] xcube=[xcube_version]`. When it fails, Panic!
+  Or better restart the process.
+
+
+### xcube conda-forge Manual Release
+
+There might be situations when you need to rebuild the version. This might happen, when 
+the software does not change, but issues with dependencies arise (also refer to 
+[conda-forge's manual](https://conda-forge.org/docs/maintainer/updating_pkgs.html)).
+
+* Fork [GitHub](https://github.com/conda-forge/xcube-feedstock)
+* Create a branch [xcube_version]
+* Download [release](https://github.com/dcs4cop/xcube/archive/v[version].tar.gz) from GitHub
+  and compute its sha256 sum: ```sha256sum v[version].tar.gz```
+* Open ```recipe/meta.yaml```:
+  - Set the correct version at the top of the file (format without prefix 'v', e.g. 0.2.1)
+  - Exchange the sha256 sum in the section 'source'
+  - Bump the build number (if the version is unchanged!)
+  - Reset the build number to `0` (if the version is! changed)
+  - [Re-rendered]( https://conda-forge.org/docs/maintainer/updating_pkgs.html#rerendering-feedstocks ) with the latest `conda-smithy` (Use the phrase <code>@<space/>conda-forge-admin, please rerender</code> in a comment in this PR for automated rerendering)
+  - Ensure that the run! requirements are 100% in sync with xcube
+  - Ensure that the build! python version is in sync with the run section
+  - Check the entry points. These need to be in sync with xcube's setup.py!
+  - Ensure the license file is being packaged (in the xcube release archive) and that 
+    the file name of the license file in the archive and the in the meta.yml are the same.     
+  - Check whether all other info (e.g. the about section) is up-to-date and correct   
+* Commit and push your changes
+* Run  
+* Run `conda build -c conda-forge recipe` in the terminal 
+* Push your changes and monitor the build process if the previous step succeeded
+* Create a pull request    
+* Open the PR on [GitHub](https://github.com/conda-forge/xcube-feedstock) and 
+  monitor the checks 
+* When they succeed, check the PR's checklist, accept the PR and merge it
+* The actual deployment will take a while. Once the new version has been published, 
+  test it by running `conda create -n [your_env] xcube=[xcube_version]`. When it fails, Panic!
+  Or better restart the process.
+  
 If any changes apply to `xcube serve` and the xcube Web API:
 
 Make sure changes are reflected in `xcube/webapi/res/openapi.yml`. 
