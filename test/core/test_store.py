@@ -1,3 +1,4 @@
+import threading
 import unittest
 import warnings
 from typing import Tuple
@@ -10,7 +11,44 @@ from xcube.core.store import CubeStore
 
 class CubeStoreTest(unittest.TestCase):
 
-    def test_cube_store(self):
+    def test_concurrency_is_provided(self):
+
+        threads = set()
+        indexes = list()
+        errors = list()
+
+        def get_chunk(cube_store: CubeStore, name: str, index: Tuple[int, ...]) -> bytes:
+            # print('get_chunk: ', name, index, threading.current_thread())
+            try:
+                print()
+                threads.add(threading.current_thread())
+                indexes.append(index)
+                data = np.zeros(cube_store.chunks, dtype=np.float64)
+                data_view = data.ravel()
+                return data_view.tobytes()
+            except BaseException as error:
+                errors.append(error)
+
+        store = CubeStore(dims=('time', 'y', 'x'), shape=(4, 8, 16), chunks=(2, 4, 8))
+        store.add_lazy_array('TEST', '<f8', get_chunk=get_chunk)
+
+        print(f'len(threads) = {len(threads)}')
+        ds = xr.open_zarr(store)
+        print(f'len(threads) = {len(threads)}')
+        try:
+            var = ds.TEST.compute()
+        except BaseException as e:
+            print(e)
+        print(f'len(threads) = {len(threads)}')
+
+        self.assertEqual((4, 8, 16), var.shape)
+        self.assertEqual(2 * 2 * 2, len(indexes))
+        self.assertEqual(0, len(errors))
+        print(f'len(threads) = {len(threads)}')
+        self.assertTrue(2 <= len(threads) <= 8, msg=f'was {len(threads)}')
+
+
+    def test_lazy_index_var(self):
         index_var = gen_index_var(dims=('time', 'lat', 'lon'),
                                   shape=(4, 8, 16),
                                   chunks=(2, 4, 8))
@@ -39,8 +77,6 @@ class CubeStoreTest(unittest.TestCase):
         values = result.values
         self.assertEqual((4, 8, 16), values.shape)
         np.testing.assert_array_equal(index_var.values, values)
-
-        print(visited_indexes)
 
         self.assertEqual(8, len(visited_indexes))
         self.assertEqual({
