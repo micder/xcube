@@ -10,18 +10,18 @@ from typing import Tuple
 
 import aiohttp
 import click
-import numcodecs
 import numpy as np
 import requests
 import xarray as xr
-
 import zarr
+
 from xcube.core.dsio import rimraf
 from xcube.core.store import CubeStore
 
 DEFAULT_COMPRESSOR = zarr.Blosc()
 DEFAULT_COMPRESSOR_CONFIG = DEFAULT_COMPRESSOR.get_config()
 
+DEFAULT_SERVER = 'flask'
 DEFAULT_TILE_SIZE = 1024
 
 NUM_X_TILES = 5
@@ -119,14 +119,21 @@ def _test_async(port: int, tile_size: int, dataset_path: str, var_name: str, wri
                 fp, indent=2)
 
     async def fetch(url, session):
-        async with session.get(url) as response:
-            return await response.read()
+        try:
+            async with session.get(url) as response:
+                if 200 <= response.status < 400:
+                    return await response.read()
+                else:
+                    print('http error:', response, flush=True)
+        except BaseException as e:
+            print('error:', e, flush=True)
+            return None
 
     async def bound_fetch(session, sem, url, chunk_name):
         # Getter function with semaphore.
         async with sem:
             data = await fetch(url, session)
-            if write:
+            if data and write:
                 write_data(data, chunk_name)
             return data
 
@@ -145,22 +152,20 @@ def _test_async(port: int, tile_size: int, dataset_path: str, var_name: str, wri
         tasks = []
 
         # operating systems limit the total number of open sockets (files) allowed
-        # therefore we create an instance of Semaphore allowing only 1000 sockets
-        sem = asyncio.Semaphore(1000)
+        # therefore we create an instance of Semaphore allowing only limed number of sockets
+        sem = asyncio.Semaphore(64)
 
         # Create client session that will ensure we don't open new connection
         # per each request.
         async with aiohttp.ClientSession() as session:
             for url, chunk_name in requests:
-                # pass Semaphore and session to every GET request
                 task = asyncio.ensure_future(bound_fetch(session, sem, url, chunk_name))
                 tasks.append(task)
             responses = asyncio.gather(*tasks)
             await responses
 
-    loop = asyncio.get_event_loop()
     future = asyncio.ensure_future(run())
-    loop.run_until_complete(future)
+    asyncio.get_event_loop().run_until_complete(future)
 
 
 def _test_store(port: int, tile_size: int, dataset_path: str, var_name: str, write=False, compress=False):
@@ -192,9 +197,12 @@ def _make_tile_url(port, z, y, x):
 
 @click.command(name="tile_client")
 @click.argument('name', type=click.Choice(tuple(get_tests().keys())))
+@click.option('--server', help=f'Server type. Defaults to {DEFAULT_SERVER!r}.',
+              default=DEFAULT_SERVER)
 @click.option('--tile-size', help=f'Tile size. Defaults to {DEFAULT_TILE_SIZE}.',
               type=int, default=DEFAULT_TILE_SIZE)
 def tile_client(name: str,
+                server: str = None,
                 tile_size: int = None):
     """
     Run the test tile client.
@@ -203,6 +211,8 @@ def tile_client(name: str,
     var_name = 'TEST'
     with subprocess.Popen([sys.executable,
                            os.path.join(os.path.dirname(__file__), 'tile_server.py'),
+                           '--server',
+                           server,
                            '--name',
                            name,
                            '--tile-size',
