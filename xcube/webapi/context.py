@@ -213,6 +213,17 @@ class ServiceContext:
                     raise ServiceResourceNotFoundError(f'Variable "{var_name}" not found in dataset "{ds_id}"')
         return dataset
 
+    def get_time_series_dataset(self, ds_id: str, var_name: str = None) -> xr.Dataset:
+        descriptor = self.get_dataset_descriptor(ds_id)
+        ts_ds_name = descriptor.get('TimeSeriesDataset', ds_id)
+        try:
+            # Try to get more efficient, time-chunked dataset
+            return self.get_dataset(ts_ds_name, expected_var_names=[var_name] if var_name else None)
+        except ServiceResourceNotFoundError:
+            # This happens, if the dataset pointed to by 'TimeSeriesDataset'
+            # does not contain the variable given by var_name.
+            return self.get_dataset(ds_id, expected_var_names=[var_name] if var_name else None)
+
     def get_variable_for_z(self, ds_id: str, var_name: str, z_index: int) -> xr.DataArray:
         ml_dataset = self.get_ml_dataset(ds_id)
         index = ml_dataset.num_levels - 1 - z_index
@@ -651,19 +662,19 @@ def _open_ml_dataset_from_object_storage(ctx: ServiceContext,
     ds_id = dataset_descriptor.get('Identifier')
     path = ctx.get_descriptor_path(dataset_descriptor, f"dataset descriptor {ds_id}", is_url=True)
     data_format = dataset_descriptor.get('Format', FORMAT_NAME_ZARR)
+    client_kwargs = dict()
     endpoint_url = None
     if 'Endpoint' in dataset_descriptor:
-        endpoint_url = dataset_descriptor['Endpoint']
+        client_kwargs['endpoint_url'] = dataset_descriptor['Endpoint']
     region_name = None
     if 'Region' in dataset_descriptor:
-        region_name = dataset_descriptor['Region']
+        client_kwargs['region_name'] = dataset_descriptor['Region']
     chunk_cache_capacity = ctx.get_dataset_chunk_cache_capacity(dataset_descriptor)
     return open_ml_dataset_from_object_storage(path,
                                                data_format=data_format,
                                                ds_id=ds_id,
                                                exception_type=ServiceConfigError,
-                                               endpoint_url=endpoint_url,
-                                               region_name=region_name,
+                                               client_kwargs=client_kwargs,
                                                chunk_cache_capacity=chunk_cache_capacity)
 
 

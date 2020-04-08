@@ -1,6 +1,7 @@
 import os
 import threading
 import uuid
+import warnings
 from abc import abstractmethod, ABCMeta
 from typing import Sequence, Any, Dict, Callable, Mapping, Optional
 
@@ -13,7 +14,8 @@ from xcube.constants import FORMAT_NAME_NETCDF4
 from xcube.constants import FORMAT_NAME_SCRIPT
 from xcube.constants import FORMAT_NAME_ZARR
 from xcube.core.dsio import guess_dataset_format
-from xcube.core.dsio import split_bucket_url
+from xcube.core.dsio import is_obs_url
+from xcube.core.dsio import parse_obs_url_and_kwargs
 from xcube.core.dsio import write_cube
 from xcube.core.geom import get_dataset_bounds
 from xcube.core.verify import assert_cube
@@ -161,7 +163,7 @@ class LazyMultiLevelDataset(MultiLevelDataset, metaclass=ABCMeta):
 
         :return: the dataset for the level at *index*.
         """
-        return _get_dataset_tile_grid(self.get_dataset(0))
+        return get_dataset_tile_grid(self.get_dataset(0))
 
     def close(self):
         with self._lock:
@@ -293,7 +295,7 @@ class FileStorageMultiLevelDataset(LazyMultiLevelDataset):
 
         :return: the dataset for the level at *index*.
         """
-        return _get_dataset_tile_grid(self.get_dataset(0), num_levels=self._num_levels)
+        return get_dataset_tile_grid(self.get_dataset(0), num_levels=self._num_levels)
 
 
 class ObjectStorageMultiLevelDataset(LazyMultiLevelDataset):
@@ -392,7 +394,7 @@ class ObjectStorageMultiLevelDataset(LazyMultiLevelDataset):
 
         :return: the dataset for the level at *index*.
         """
-        return _get_dataset_tile_grid(self.get_dataset(0), num_levels=self._num_levels)
+        return get_dataset_tile_grid(self.get_dataset(0), num_levels=self._num_levels)
 
 
 class BaseMultiLevelDataset(LazyMultiLevelDataset):
@@ -511,14 +513,22 @@ class ComputedMultiLevelDataset(LazyMultiLevelDataset):
         return assert_cube(computed_value, name=self.ds_id)
 
 
-def _get_dataset_tile_grid(dataset: xr.Dataset, num_levels: int = None) -> TileGrid:
+def get_dataset_tile_grid(dataset: xr.Dataset, num_levels: int = None) -> TileGrid:
+    """
+    Compute the tile grid for the given *dataset* and an optional number of resolution
+    levels *num_levels*, if given.
+
+    :param dataset: The dataset.
+    :param num_levels: The number of resolution levels.
+    :return: A TileGrid object
+    """
     geo_extent = get_dataset_bounds(dataset)
     inv_y = float(dataset.lat[0]) < float(dataset.lat[-1])
     width, height, tile_width, tile_height = _get_cube_spatial_sizes(dataset)
     if num_levels is not None and tile_width is not None and tile_height is not None:
         width_0 = width
         height_0 = height
-        for i in range(num_levels):
+        for i in range(num_levels - 1):
             width_0 = (width_0 + 1) // 2
             height_0 = (height_0 + 1) // 2
         num_level_zero_tiles_x = (width_0 + tile_width - 1) // tile_width
@@ -539,6 +549,13 @@ def _get_dataset_tile_grid(dataset: xr.Dataset, num_levels: int = None) -> TileG
             tile_grid = TileGrid(num_levels,
                                  num_level_zero_tiles_x, num_level_zero_tiles_y,
                                  width, height, geo_extent, inv_y)
+
+    if tile_width is not None and tile_width != tile_grid.tile_width:
+        warnings.warn(f'FIXME: wanted tile_width={tile_width} as of chunking, but will use {tile_grid.tile_width}. '
+                      f'This is inefficient.')
+    if tile_height is not None and tile_height != tile_grid.tile_height:
+        warnings.warn(f'FIXME: wanted tile_height={tile_width} as of chunking, but will use {tile_grid.tile_height}. '
+                      f'This is inefficient.')
 
     return tile_grid
 
@@ -616,10 +633,7 @@ def open_ml_dataset(path: str,
     """
     if not path:
         raise ValueError('path must be given')
-    if path.startswith('http://') \
-            or path.startswith('https://') \
-            or path.startswith('s3://') \
-            or 'endpoint_url' in kwargs:
+    if is_obs_url(path):
         return open_ml_dataset_from_object_storage(path, ds_id=ds_id, exception_type=exception_type, **kwargs)
     elif path.endswith('.py'):
         return open_ml_dataset_from_python_code(path, ds_id=ds_id, exception_type=exception_type, **kwargs)
@@ -637,30 +651,21 @@ def open_ml_dataset_from_object_storage(path: str,
                                         **kwargs) -> MultiLevelDataset:
     data_format = data_format or guess_ml_dataset_format(path)
 
-    endpoint_url, root = split_bucket_url(path)
-    if endpoint_url:
-        kwargs['endpoint_url'] = endpoint_url
-        path = root
-
-    client_kwargs = dict(client_kwargs or {})
-    for arg_name in ['endpoint_url', 'region_name']:
-        if arg_name in kwargs:
-            client_kwargs[arg_name] = kwargs.pop(arg_name)
-
-    obs_file_system = s3fs.S3FileSystem(anon=True, client_kwargs=client_kwargs)
+    root, obs_fs_kwargs, obs_fs_client_kwargs = parse_obs_url_and_kwargs(path, client_kwargs)
+    obs_fs = s3fs.S3FileSystem(**obs_fs_kwargs, client_kwargs=obs_fs_client_kwargs)
 
     if data_format == FORMAT_NAME_ZARR:
-        store = s3fs.S3Map(root=path, s3=obs_file_system, check=False)
+        store = s3fs.S3Map(root=root, s3=obs_fs, check=False)
         if chunk_cache_capacity:
             store = zarr.LRUStoreCache(store, max_size=chunk_cache_capacity)
         with measure_time(tag=f"opened remote zarr dataset {path}"):
-            consolidated = obs_file_system.exists(f'{path}/.zmetadata')
+            consolidated = obs_fs.exists(f'{root}/.zmetadata')
             ds = assert_cube(xr.open_zarr(store, consolidated=consolidated, **kwargs))
         return BaseMultiLevelDataset(ds, ds_id=ds_id)
     elif data_format == FORMAT_NAME_LEVELS:
         with measure_time(tag=f"opened remote levels dataset {path}"):
-            return ObjectStorageMultiLevelDataset(obs_file_system,
-                                                  path,
+            return ObjectStorageMultiLevelDataset(obs_fs,
+                                                  root,
                                                   zarr_kwargs=kwargs,
                                                   ds_id=ds_id,
                                                   chunk_cache_capacity=chunk_cache_capacity,
