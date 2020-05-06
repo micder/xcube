@@ -1,3 +1,9 @@
+## Changes in 0.4.3
+
+* Extended `xcube serve` by reverse URL prefix option `--revprefix REFPREFIX`.
+  This can be used in cases where only URLs returned by the service need to be prefixed, 
+  e.g. by a web server's proxy pass.
+
 ## Changes in 0.4.2 
 
 * Fixed a problem during release process. No code changes.
