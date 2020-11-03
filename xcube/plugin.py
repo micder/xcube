@@ -175,6 +175,7 @@ def _register_cli_commands(ext_registry: extension.ExtensionRegistry):
         'resample',
         'serve',
         'tile',
+        'tmsgrid',
         'vars2dim',
         'verify',
 
