@@ -1,3 +1,4 @@
+import math
 import os
 import threading
 import uuid
@@ -525,7 +526,7 @@ def get_dataset_tile_grid(dataset: xr.Dataset, num_levels: int = None) -> TileGr
     geo_extent = get_dataset_bounds(dataset)
     inv_y = float(dataset.lat[0]) < float(dataset.lat[-1])
     width, height, tile_width, tile_height = _get_cube_spatial_sizes(dataset)
-    if num_levels is not None and tile_width is not None and tile_height is not None:
+    if tile_width is not None and tile_height is not None:
         width_0 = width
         height_0 = height
         for i in range(num_levels - 1):
@@ -533,6 +534,8 @@ def get_dataset_tile_grid(dataset: xr.Dataset, num_levels: int = None) -> TileGr
             height_0 = (height_0 + 1) // 2
         num_level_zero_tiles_x = (width_0 + tile_width - 1) // tile_width
         num_level_zero_tiles_y = (height_0 + tile_height - 1) // tile_height
+        if num_levels is None:
+            num_levels = min(round(math.log2(width / tile_width)), round(math.log2(height / tile_height))) or 1
         tile_grid = TileGrid(num_levels,
                              num_level_zero_tiles_x, num_level_zero_tiles_y,
                              tile_width, tile_height,
