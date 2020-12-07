@@ -21,6 +21,9 @@
 #  IN THE SOFTWARE.
 #
 
+# import os
+# os.environ["NUMBA_DISABLE_JIT"] = "1"
+
 import pytest
 import numpy as np
 
@@ -30,7 +33,15 @@ from xcube.core.resample_spatial import resample_in_space
 
 
 def scale_up(array, scale):
-    return array.repeat(scale, axis=1).repeat(scale, axis=2)
+    scaled = array.repeat(scale, axis=1).repeat(scale, axis=2)
+    border_width = scale // 2
+    if border_width > 0:
+        fill_value = -(2 ** 63)
+        scaled[0, 0:border_width] = fill_value
+        scaled[0, -border_width:] = fill_value
+        scaled[0, :, 0:border_width] = fill_value
+        scaled[0, :, -border_width:] = fill_value
+    return scaled
 
 
 def array_to_cube(array):
@@ -55,6 +66,7 @@ def diagnostic_plot(input_cube, expected, actual, scale):
         plt.title(name)
 
     plt.rcParams["figure.figsize"] = (14, 4)
+    plt.clf()
     add_plot(1, input_cube, "input")
     add_plot(2, expected, "expected")
     add_plot(3, actual, "actual")
@@ -63,16 +75,19 @@ def diagnostic_plot(input_cube, expected, actual, scale):
     plt.savefig(f"{home}/rectify-{scale}.png")
 
 
-@pytest.mark.xfail
-@pytest.mark.parametrize("scale_factor", [2])
-def test_basic_pattern(scale_factor, diagnostics_option):
-    pattern = np.array([[
-        [2, 2, 1, 1],
-        [2, 2, 0, 1],
-        [1, 0, 0, 1],
-        [1, 1, 1, 1]
-    ]])
-
+@pytest.mark.parametrize("pattern", [
+    [[2, 2, 1, 1],
+     [2, 2, 0, 1],
+     [1, 0, 0, 1],
+     [1, 1, 1, 1]],
+    [[1, 2, 3, 4],
+     [5, 6, 7, 8],
+     [-1, -2, -3, -4],
+     [-5, -6, -7, -8]]
+])
+@pytest.mark.parametrize("scale_factor", [1, 2, 3, 4])
+def test_basic_pattern(pattern, scale_factor, diagnostics_option):
+    pattern = np.array([pattern])
     input_cube = array_to_cube(pattern)
     expected_output = array_to_cube(scale_up(pattern, scale_factor))
     geometry = ImageGeom(
