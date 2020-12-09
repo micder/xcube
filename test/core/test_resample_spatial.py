@@ -92,6 +92,13 @@ def array_to_cube(array):
                     variables={"var1": array})
 
 
+@pytest.fixture
+def minimal_cube():
+    return new_cube(width=2, height=2, time_periods=1,
+                    x_start=0, y_start=0, x_res=2, y_res=2,
+                    variables={"var1": np.array([[[1, 2], [3, 4]]])})
+
+
 def diagnostic_plot(input_cube, expected, actual, scale):
     """Save images of data arrays to user's home directory
 
@@ -151,7 +158,7 @@ def test_basic_pattern(pattern, scale_factor, diagnostics_option):
     )
     actual_output = resample_in_space(
         dataset=input_cube,
-        var_names="var1",
+        var_names={"var1": "linear"},
         output_geom=geometry
     )
 
@@ -163,3 +170,12 @@ def test_basic_pattern(pattern, scale_factor, diagnostics_option):
         expected_output.var1.data,
         actual_output.var1.data
     )
+
+
+def test_unknown_resampling_methods(minimal_cube):
+    with pytest.raises(ValueError) as exception_info:
+        resample_in_space(minimal_cube,
+                          var_names={"var1": "an_unknown_method"},
+                          output_geom=ImageGeom(2, 2, 1)
+                          )
+        assert "an_unknown_method" in str(exception_info.value)

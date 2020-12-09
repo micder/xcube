@@ -20,16 +20,33 @@
 #  FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 #  IN THE SOFTWARE.
 #
+from typing import Mapping
 
 import xarray as xr
 
+from xcube.core.imgeom import ImageGeom
 from xcube.core.rectify import rectify_dataset
 
 
 def resample_in_space(dataset: xr.Dataset,
-                      var_names, output_geom) -> xr.Dataset:
+                      var_names: Mapping[str, str],
+                      output_geom: ImageGeom) -> xr.Dataset:
+    """Spatially resample a dataset.
+
+    :param dataset: input dataset to resample
+    :param var_names: mapping from variable names to resampling methods
+    :param output_geom: output geometry
+    :return: dataset resampled to the specified output geometry
+    """
+
+    # At present, we only support linear resampling via rectify.
+    unsupported_methods = set(var_names.values()) - {"linear"}
+    if unsupported_methods:
+        raise ValueError("Unsupported resampling method(s): " +
+                         ", ".join(unsupported_methods))
+
     return rectify_dataset(
         dataset=dataset,
-        var_names=var_names,
+        var_names=list(var_names.keys()),
         output_geom=output_geom
     )
