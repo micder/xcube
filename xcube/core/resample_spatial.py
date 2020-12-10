@@ -54,7 +54,7 @@ def resample_in_space(dataset: xr.Dataset,
                          "must be supplied.")
 
     if output_geom is None:
-        output_geom = ImageGeom.from_dataset(dataset)
+        output_geom = ImageGeom.from_dataset(coregister_to)
 
     return rectify_dataset(
         dataset=dataset,

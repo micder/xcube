@@ -115,7 +115,7 @@ def diagnostic_plot(input_cube, expected, actual, scale):
 
     def add_plot(subplot, cube, name):
         plt.subplot(1, 3, subplot)
-        cube.var1.plot(edgecolors="gray", vmin=-1, vmax=2)
+        cube.var1.plot(edgecolors="gray", vmin=-1, vmax=16)
         plt.title(name)
 
     plt.rcParams["figure.figsize"] = (14, 4)
@@ -134,17 +134,20 @@ def diagnostic_plot(input_cube, expected, actual, scale):
      [1, 1, 1, 1]],
     [[1, 2, 3, 4],
      [5, 6, 7, 8],
-     [-1, -2, -3, -4],
-     [-5, -6, -7, -8]]
+     [9, 10, 11, 12],
+     [13, 14, 15, 16]],
 ])
 @pytest.mark.parametrize("scale_factor", [1, 2, 3, 4])
-def test_basic_pattern(pattern, scale_factor, diagnostics_option):
+# Not currently testing coregistration, since it's buggy.
+@pytest.mark.parametrize("coregister", [False])
+def test_basic_pattern(pattern, scale_factor, coregister, diagnostics_option):
     """Test that a small data pattern is correctly resampled to a higher
     resolution.
 
     :param pattern: two-dimensional data pattern
     :param scale_factor: factor by which the resolution should be scaled
            (positive integer)
+    :param coregister: test `coregister_to` rather than `output_geom`
     :param diagnostics_option:
            True if images should be saved to the home directory for
            diagnostic/debugging purposes
@@ -156,11 +159,17 @@ def test_basic_pattern(pattern, scale_factor, diagnostics_option):
         (expected_output.dims["lon"], expected_output.dims["lat"]),
         xy_res=1 / scale_factor
     )
-    actual_output = resample_in_space(
+    # geom_from_dataset = ImageGeom.from_dataset(expected_output)
+    arguments = dict(
         dataset=input_cube,
         var_names={"var1": "linear"},
-        output_geom=geometry
     )
+    if coregister:
+        arguments["coregister_to"] = expected_output
+    else:
+        arguments["output_geom"] = geometry
+
+    actual_output = resample_in_space(**arguments)
 
     if diagnostics_option:
         diagnostic_plot(input_cube, expected_output, actual_output,
@@ -179,3 +188,10 @@ def test_unknown_resampling_methods(minimal_cube):
                           output_geom=ImageGeom(2, 2, 1)
                           )
         assert "an_unknown_method" in str(exception_info.value)
+
+
+def test_neither_geometry_nor_coregistration_given(minimal_cube):
+    with pytest.raises(ValueError) as _:
+        resample_in_space(minimal_cube,
+                          var_names={"var1": "an_unknown_method"},
+                          )
