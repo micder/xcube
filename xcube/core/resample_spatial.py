@@ -30,12 +30,15 @@ from xcube.core.rectify import rectify_dataset
 
 def resample_in_space(dataset: xr.Dataset,
                       var_names: Mapping[str, str],
-                      output_geom: ImageGeom) -> xr.Dataset:
+                      output_geom: ImageGeom = None,
+                      coregister_to: xr.Dataset = None,
+                      ) -> xr.Dataset:
     """Spatially resample a dataset.
 
     :param dataset: input dataset to resample
     :param var_names: mapping from variable names to resampling methods
     :param output_geom: output geometry
+    :param coregister_to: coregister `dataset` to this dataset
     :return: dataset resampled to the specified output geometry
     """
 
@@ -44,6 +47,14 @@ def resample_in_space(dataset: xr.Dataset,
     if unsupported_methods:
         raise ValueError("Unsupported resampling method(s): " +
                          ", ".join(unsupported_methods))
+
+    # either the output geometry or a coregistration target must be specified
+    if (output_geom is None) == (coregister_to is None):
+        raise ValueError("Precisely one of output_geom and coregister_to "
+                         "must be supplied.")
+
+    if output_geom is None:
+        output_geom = ImageGeom.from_dataset(dataset)
 
     return rectify_dataset(
         dataset=dataset,
