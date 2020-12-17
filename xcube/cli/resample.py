@@ -23,6 +23,7 @@ from typing import Sequence, Dict, Any
 import click
 
 from xcube.constants import FORMAT_NAME_ZARR, FORMAT_NAME_NETCDF4, FORMAT_NAME_MEM
+from xcube.core.imgeom import ImageGeom
 
 UPSAMPLING_METHODS = ['asfreq', 'ffill', 'bfill', 'pad', 'nearest', 'interpolate']
 DOWNSAMPLING_METHODS = ['count', 'first', 'last', 'min', 'max', 'sum', 'prod', 'mean', 'median', 'std', 'var']
@@ -92,6 +93,22 @@ DEFAULT_INTERPOLATION_KIND = 'linear'
                    'If the time delta exceeds the tolerance, '
                    'fill values (NaN) will be used. '
                    'Defaults to the given frequency.')
+@click.option("--xmin", type=float,
+              help="x minimum for spatial resampling")
+@click.option("--ymin", type=float,
+              help="y minimum for spatial resampling")
+@click.option("--xsize", type=float,
+              help="y size for spatial resampling")
+@click.option("--ysize", type=float,
+              help="y size for spatial resampling")
+@click.option("--resolution", type=float,
+              help="x and y resolution for spatial resampling")
+@click.option("--coregister-to", "-C", type=str,
+              help="Filename of a cube to use as a coregistration target")
+@click.option("--spatial-first", "-s", default=False, is_flag=True,
+              help="Do the spatial resampling first when performing both "
+                   "spatial and temporal resampling. If this option is "
+                   "omitted, temporal resampling will be done first.")
 @click.option('--dry-run', default=False, is_flag=True,
               help='Just read and process inputs, but don\'t produce any outputs.')
 def resample(cube,
@@ -105,6 +122,13 @@ def resample(cube,
              base,
              kind,
              tolerance,
+             xmin,
+             ymin,
+             xsize,
+             ysize,
+             resolution,
+             coregister_to,
+             spatial_first,
              dry_run):
     """
     Resample data along the time dimension.
@@ -136,6 +160,20 @@ def resample(cube,
         config['interp_kind'] = kind
     if tolerance:
         config['tolerance'] = tolerance
+    if xmin:
+        config["xmin"] = xmin
+    if ymin:
+        config["ymin"] = ymin
+    if xsize:
+        config["xsize"] = xsize
+    if ysize:
+        config["ysize"] = ysize
+    if resolution:
+        config["resolution"] = resolution
+    if coregister_to:
+        config["coregister_to"] = coregister_to
+    if spatial_first:
+        config["spatial_first"] = spatial_first
     if variables:
         try:
             variables = set(map(lambda c: str(c).strip(), variables.split(',')))
@@ -155,47 +193,85 @@ def resample(cube,
                 raise click.ClickException(f'invalid resampling method {method!r}')
 
     # noinspection PyBroadException
-    _resample_in_time(**config, dry_run=dry_run, monitor=print)
+    _resample(**config, dry_run=dry_run, monitor=print)
 
     return 0
 
 
-def _resample_in_time(input_path: str = None,
-                      variables: Sequence[str] = None,
-                      metadata: Dict[str, Any] = None,
-                      output_path: str = DEFAULT_OUTPUT_PATH,
-                      output_format: str = None,
-                      methods: Sequence[str] = (DEFAULT_RESAMPLING_METHOD,),
-                      frequency: str = DEFAULT_RESAMPLING_FREQUENCY,
-                      offset: str = None,
-                      base: int = DEFAULT_RESAMPLING_BASE,
-                      interp_kind: str = DEFAULT_INTERPOLATION_KIND,
-                      tolerance: str = None,
-                      dry_run: bool = False,
-                      monitor=None):
+def _resample(input_path: str = None,
+              variables: Sequence[str] = None,
+              metadata: Dict[str, Any] = None,
+              output_path: str = DEFAULT_OUTPUT_PATH,
+              output_format: str = None,
+              methods: Sequence[str] = (DEFAULT_RESAMPLING_METHOD,),
+              frequency: str = DEFAULT_RESAMPLING_FREQUENCY,
+              offset: str = None,
+              base: int = DEFAULT_RESAMPLING_BASE,
+              interp_kind: str = DEFAULT_INTERPOLATION_KIND,
+              tolerance: str = None,
+              xmin: float = None,
+              ymin: float = None,
+              xsize: float = None,
+              ysize: float = None,
+              resolution: float = None,
+              coregister_to: str = None,
+              spatial_first: bool = False,
+              dry_run: bool = False,
+              monitor=None):
     from xcube.core.dsio import guess_dataset_format
     from xcube.core.dsio import open_cube
     from xcube.core.dsio import write_cube
     from xcube.core.resample import resample_in_time
+    from xcube.core.resample_spatial import resample_in_space
     from xcube.core.update import update_dataset_chunk_encoding
 
     if not output_format:
         output_format = guess_dataset_format(output_path)
 
+    if coregister_to:
+        monitor(f"Opening coregistration target from {coregister_to}...")
+        coregistration_target = open_cube(coregister_to)
+        monitor("Done.")
+    else:
+        coregistration_target = None
+
     monitor(f'Opening cube from {input_path!r}...')
     with open_cube(input_path) as ds:
 
         monitor('Resampling...')
-        agg_ds = resample_in_time(ds,
-                                  frequency=frequency,
-                                  method=methods,
-                                  offset=offset,
-                                  base=base,
-                                  interp_kind=interp_kind,
-                                  tolerance=tolerance,
-                                  time_chunk_size=1,
-                                  var_names=variables,
-                                  metadata=metadata)
+
+        def resample_time_with_params(input_ds):
+            return resample_in_time(input_ds,
+                                    frequency=frequency,
+                                    method=methods,
+                                    offset=offset,
+                                    base=base,
+                                    interp_kind=interp_kind,
+                                    tolerance=tolerance,
+                                    time_chunk_size=1,
+                                    var_names=variables,
+                                    metadata=metadata)
+
+        def resample_space_with_params(input_ds):
+            if coregistration_target:
+                return resample_in_space(input_ds,
+                                         var_names=variables,
+                                         coregister_to=coregistration_target)
+            else:
+                output_geom = ImageGeom(size=(int(xsize), int(ysize)),
+                                        tile_size=None,
+                                        x_min=xmin,
+                                        y_min=ymin,
+                                        xy_res=resolution,
+                                        is_geo_crs=False)
+                return resample_in_space(input_ds,
+                                         var_names=variables,
+                                         output_geom=output_geom)
+
+        if spatial_first:
+            agg_ds = resample_time_with_params(resample_space_with_params(ds))
+        else:
+            agg_ds = resample_space_with_params(resample_time_with_params(ds))
 
         agg_ds = update_dataset_chunk_encoding(agg_ds,
                                                chunk_sizes={},

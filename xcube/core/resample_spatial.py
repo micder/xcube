@@ -21,6 +21,8 @@
 #  IN THE SOFTWARE.
 #
 from typing import Mapping
+from typing import Sequence
+from typing import Union
 
 import xarray as xr
 
@@ -29,24 +31,30 @@ from xcube.core.rectify import rectify_dataset
 
 
 def resample_in_space(dataset: xr.Dataset,
-                      var_names: Mapping[str, str],
+                      var_names: Union[Mapping[str, str], Sequence[str]],
                       output_geom: ImageGeom = None,
                       coregister_to: xr.Dataset = None,
                       ) -> xr.Dataset:
     """Spatially resample a dataset.
 
     :param dataset: input dataset to resample
-    :param var_names: mapping from variable names to resampling methods
+    :param var_names: mapping from variable names to resampling method names,
+           or sequence of variable names (in which case the default method will
+           be used for all of them)
     :param output_geom: output geometry
     :param coregister_to: coregister `dataset` to this dataset
     :return: dataset resampled to the specified output geometry
     """
 
-    # At present, we only support linear resampling via rectify.
-    unsupported_methods = set(var_names.values()) - {"linear"}
-    if unsupported_methods:
-        raise ValueError("Unsupported resampling method(s): " +
-                         ", ".join(unsupported_methods))
+    if isinstance(var_names, list):
+        # Default: set linear resampling for all variables
+        var_names = {var_name: "linear" for var_name in var_names}
+    else:
+        # At present, we only support linear resampling via rectify.
+        unsupported_methods = set(var_names.values()) - {"linear"}
+        if unsupported_methods:
+            raise ValueError("Unsupported resampling method(s): " +
+                             ", ".join(unsupported_methods))
 
     # either the output geometry or a coregistration target must be specified
     if (output_geom is None) == (coregister_to is None):
