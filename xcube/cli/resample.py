@@ -46,8 +46,10 @@ DEFAULT_INTERPOLATION_KIND = 'linear'
 @click.command(name='resample')
 @click.argument('cube')
 @click.option('--config', '-c', metavar='CONFIG', multiple=True,
-              help='xcube dataset configuration file in YAML format. More than one config input file is allowed.'
-                   'When passing several config files, they are merged considering the order passed via command line.')
+              help='xcube dataset configuration file in YAML format. '
+                   'More than one config input file is allowed. '
+                   'When passing several config files, they are merged '
+                   'considering the order passed via command line.')
 @click.option('--output', '-o', metavar='OUTPUT',
               default=DEFAULT_OUTPUT_PATH,
               help=f"Output path. Defaults to {DEFAULT_OUTPUT_PATH!r}.")
@@ -105,10 +107,10 @@ DEFAULT_INTERPOLATION_KIND = 'linear'
               help="x and y resolution for spatial resampling")
 @click.option("--coregister-to", "-C", type=str,
               help="Filename of a cube to use as a coregistration target")
-@click.option("--spatial-first", "-s", default=False, is_flag=True,
-              help="Do the spatial resampling first when performing both "
-                   "spatial and temporal resampling. If this option is "
-                   "omitted, temporal resampling will be done first.")
+@click.option("--stages", "-s", default="time",
+              type=click.Choice(["time", "space", "time,space", "space,time"],
+                                case_sensitive=False),
+              help="Which type(s) of resampling to do, and in which order.")
 @click.option('--dry-run', default=False, is_flag=True,
               help='Just read and process inputs, but don\'t produce any outputs.')
 def resample(cube,
@@ -128,10 +130,10 @@ def resample(cube,
              ysize,
              resolution,
              coregister_to,
-             spatial_first,
+             stages,
              dry_run):
     """
-    Resample data along the time dimension.
+    Resample data in the time and/or space dimensions.
     """
 
     input_path = cube
@@ -172,8 +174,8 @@ def resample(cube,
         config["resolution"] = resolution
     if coregister_to:
         config["coregister_to"] = coregister_to
-    if spatial_first:
-        config["spatial_first"] = spatial_first
+    if stages:
+        config["stages"] = stages
     if variables:
         try:
             variables = set(map(lambda c: str(c).strip(), variables.split(',')))
@@ -215,7 +217,7 @@ def _resample(input_path: str = None,
               ysize: float = None,
               resolution: float = None,
               coregister_to: str = None,
-              spatial_first: bool = False,
+              stages: str = "time",
               dry_run: bool = False,
               monitor=None):
     from xcube.core.dsio import guess_dataset_format
@@ -268,10 +270,12 @@ def _resample(input_path: str = None,
                                          var_names=variables,
                                          output_geom=output_geom)
 
-        if spatial_first:
-            agg_ds = resample_time_with_params(resample_space_with_params(ds))
-        else:
-            agg_ds = resample_space_with_params(resample_time_with_params(ds))
+        agg_ds = ds
+        for stage in stages.split(","):
+            if stage == "time":
+                agg_ds = resample_time_with_params(agg_ds)
+            elif stage == "space":
+                agg_ds = resample_space_with_params(agg_ds)
 
         agg_ds = update_dataset_chunk_encoding(agg_ds,
                                                chunk_sizes={},
