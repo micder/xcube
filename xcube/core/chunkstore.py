@@ -25,6 +25,7 @@ from collections.abc import MutableMapping
 from typing import Iterator, Dict, Tuple, Iterable, KeysView, Callable, Any, Union, Sequence
 
 import numpy as np
+import xarray as xr
 
 __author__ = "Norman Fomferra (Brockmann Consult GmbH)"
 
@@ -250,6 +251,30 @@ class ChunkStore(MutableMapping):
         if self._trace_store_calls:
             print(f'{self._class_name}.__delitem__(key={key!r})')
         raise TypeError(f'{self._class_name} is read-only')
+
+
+def get_nan_chunk(dtype: str,
+                  shape: Sequence[int],
+                  chunk_size: Tuple[int, ...] = None,
+                  fill_value: Union[int, float] = None) -> xr.DataArray:
+    if np.issubdtype(dtype, np.integer):
+        dtype_min = np.iinfo(dtype).min
+        dtype_max = np.iinfo(dtype).max
+        if fill_value:
+            if not fill_value >= dtype_min and not fill_value <= dtype_max:
+                fill_value = dtype_max
+        else:
+            fill_value = dtype_max
+
+    if np.issubdtype(dtype, np.inexact):
+        if not fill_value:
+            fill_value = np.nan
+
+    array = np.full(shape=shape, fill_value=fill_value, dtype=dtype)
+    data = xr.DataArray(data=array)
+    if chunk_size:
+        data = data.chunk(chunk_size)
+    return data
 
 
 def _dict_to_bytes(d: Dict):

@@ -5,7 +5,7 @@ from typing import Tuple
 import numpy as np
 import xarray as xr
 
-from xcube.core.chunkstore import ChunkStore
+from xcube.core.chunkstore import ChunkStore, get_nan_chunk
 
 
 class ChunkStoreTest(unittest.TestCase):
@@ -66,6 +66,31 @@ class ChunkStoreTest(unittest.TestCase):
         self.assertEqual('uint64', index_var.encoding['dtype'])
         self.assertTrue(np.isnan(index_var.values).all())
 
+    def test_get_nan_chunk(self):
+        nan_chunk = get_nan_chunk(dtype='<u8', shape=(4, 8, 16), fill_value=99999)
+        self.assertEqual((4, 8, 16), nan_chunk.shape)
+        self.assertEqual(99999, nan_chunk.values.min())
+        self.assertEqual(99999, nan_chunk.values.max())
+        self.assertEqual('uint64', nan_chunk.values.dtype)
+
+        nan_chunk = get_nan_chunk(dtype='<u8', shape=(4, 8, 16))
+        self.assertEqual((4, 8, 16), nan_chunk.shape)
+        self.assertEqual(18446744073709551615, nan_chunk.values.min())
+        self.assertEqual(18446744073709551615, nan_chunk.values.max())
+        self.assertEqual('uint64', nan_chunk.values.dtype)
+
+        nan_chunk = get_nan_chunk(dtype='<f8', shape=(4, 8, 16))
+        self.assertEqual((4, 8, 16), nan_chunk.shape)
+        self.assertTrue(np.isnan(nan_chunk.values.min()))
+        self.assertTrue(np.isnan(nan_chunk.values.max()))
+        self.assertEqual('float64', nan_chunk.values.dtype)
+
+        nan_chunk = get_nan_chunk(dtype='<f8', shape=(4, 8, 16), chunk_size=(2,4,8))
+        self.assertEqual((4, 8, 16), nan_chunk.shape)
+        self.assertEqual(((2, 2), (4, 4), (8, 8)), nan_chunk.chunks)
+        self.assertTrue(np.isnan(nan_chunk.values.min()))
+        self.assertTrue(np.isnan(nan_chunk.values.max()))
+        self.assertEqual('float64', nan_chunk.values.dtype)
 
 def gen_index_var(dims, shape, chunks):
     # noinspection PyUnusedLocal
